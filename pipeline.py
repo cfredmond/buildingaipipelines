@@ -181,15 +181,56 @@ def _extract_first_json_object(text: str) -> dict:
 def html_to_text(html: str) -> str:
     soup = BeautifulSoup(html or "", "html.parser")
 
-    # Remove non-content elements
-    for tag in soup(["script", "style", "noscript", "svg"]):
+    # Remove non-content / chrome elements that frequently pollute extraction.
+    for tag in soup(
+        [
+            "script",
+            "style",
+            "noscript",
+            "svg",
+            "nav",
+            "header",
+            "footer",
+            "aside",
+            "form",
+            "button",
+            "iframe",
+        ]
+    ):
         tag.decompose()
 
-    text = soup.get_text(separator="\n")
-    # Normalize whitespace and drop empty lines
+    # Prefer main content containers when available.
+    main = (
+        soup.find("main")
+        or soup.find("article")
+        or soup.find(attrs={"role": "main"})
+        or soup.find(id=re.compile(r"(content|main|article)", re.I))
+        or soup.find(class_=re.compile(r"(content|main|article)", re.I))
+        or soup
+    )
+
+    # Drop common boilerplate blocks by class/id hints.
+    junk_re = re.compile(
+        r"(nav|menu|footer|header|sidebar|breadcrumb|cookie|consent|banner|modal|subscribe|newsletter|share|social|promo|advert|ads?)",
+        re.I,
+    )
+    for el in list(main.find_all(attrs={"class": junk_re})) + list(main.find_all(attrs={"id": junk_re})):
+        try:
+            el.decompose()
+        except Exception:
+            pass
+
+    text = main.get_text(separator="\n")
+
+    # Normalize whitespace and drop empty lines. Also collapse adjacent duplicates
+    # (common in site chrome, e.g. repeated menu labels).
     lines = [ln.strip() for ln in text.splitlines()]
     lines = [ln for ln in lines if ln]
-    return "\n".join(lines)
+    deduped: list[str] = []
+    for ln in lines:
+        if not deduped or deduped[-1] != ln:
+            deduped.append(ln)
+    return "\n".join(deduped)
 
 
 def fetch_extracted_text(url: str, *, timeout_s: int, user_agent: str, max_chars: int) -> tuple[str, str, str]:

@@ -1,0 +1,5 @@
+.DS_Store
+.env
+infra/.terraform.lock.hcl
+infra/lambda_src.zip
+infra/.terraform/
